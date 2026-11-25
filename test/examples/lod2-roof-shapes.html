@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>LOD2 roof shapes</title>
+    <meta property="og:description" content="Extrude buildings with LOD2 roof shapes using the fill-extrusion roof properties." />
+    <meta property="og:category" content="3D Models & Buildings" />
+    <meta property="og:order" content="20" />
+    <meta property="og:created" content="2026-10-07" />
+    <meta charset='utf-8'>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel='stylesheet' href='../../dist/maplibre-gl.css' />
+    <style>
+        body { margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+        html, body, #map { height: 100%; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 6px 10px;
+            align-items: center;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.92);
+            border-radius: 6px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+            font-size: 13px;
+        }
+        #controls output { min-width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; }
+        #controls .full { grid-column: 1 / -1; }
+        .roof-label {
+            padding: 1px 5px;
+            background: rgba(255, 255, 255, 0.85);
+            border-radius: 3px;
+            font-size: 11px;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+<div id="map"></div>
+<div id="controls">
+    <label for="shape">Shape</label>
+    <select id="shape">
+        <option value="">from data</option>
+        <option>flat</option>
+        <option>skillion</option>
+        <option>gabled</option>
+        <option>hipped</option>
+        <option>half_hipped</option>
+        <option>pyramidal</option>
+        <option>mansard</option>
+        <option>gambrel</option>
+        <option>saltbox</option>
+        <option>round</option>
+        <option>dome</option>
+    </select>
+    <span></span>
+
+    <label for="height">Roof height</label>
+    <input id="height" type="range" min="0" max="12" step="0.5" value="4">
+    <output id="height-value">data</output>
+
+    <label for="direction-mode">Direction</label>
+    <select id="direction-mode">
+        <option value="data">from data</option>
+        <option value="unset">unset (from frame)</option>
+        <option value="custom">custom</option>
+    </select>
+    <span></span>
+
+    <span></span>
+    <input id="direction" type="range" min="0" max="360" step="5" value="0" disabled>
+    <output id="direction-value"></output>
+
+    <label class="full"><input id="roof-color" type="checkbox" checked> Separate roof colour</label>
+    <label class="full"><input id="labels" type="checkbox" checked> Labels</label>
+    <button id="reset" class="full">Reset to data</button>
+    <div class="full" style="display: flex; gap: 6px;">
+        <button id="view-shapes" style="flex: 1;">All shapes</button>
+        <button id="view-complex" style="flex: 1;">Complex footprints</button>
+    </div>
+</div>
+<script type="module">
+    import * as maplibregl from '../../dist/maplibre-gl-dev.mjs';
+
+    const SHAPES = [
+        'flat', 'skillion', 'gabled', 'hipped',
+        'half_hipped', 'pyramidal', 'mansard', 'gambrel',
+        'saltbox', 'round', 'dome'
+    ];
+
+    function box(x0, y0, w, h) {
+        return [[x0, y0], [x0 + w, y0], [x0 + w, y0 + h], [x0, y0 + h], [x0, y0]];
+    }
+
+    function feature(id, roofShape, roofDirection, roofHeight, coordinates, height = 12) {
+        return {
+            type: 'Feature',
+            properties: {
+                id,
+                height,
+                min_height: 0,
+                roof_shape: roofShape,
+                roof_height: roofHeight,
+                roof_direction: roofDirection,
+                roof_color: '#b5523b',
+                facade_color: '#d8d4cc'
+            },
+            geometry: {type: 'Polygon', coordinates}
+        };
+    }
+
+    const shapes = {
+        type: 'FeatureCollection',
+        features: SHAPES.map((shape, index) => {
+            const col = index % 4;
+            const row = Math.floor(index / 4);
+            const x0 = 10.9991 + col * 0.0005;
+            const y0 = 49.0004 - row * 0.00035;
+            return feature(shape, shape, shape === 'skillion' ? 90 : 0, 4, [box(x0, y0, 0.00028, 0.00016)]);
+        })
+    };
+
+    const complex = {
+        type: 'FeatureCollection',
+        features: [
+            feature('l-shaped-hipped', 'hipped', 0, 5, [[
+                [11.0011, 48.9984], [11.0014, 48.9984], [11.0014, 48.99855],
+                [11.00125, 48.99855], [11.00125, 48.99872], [11.0011, 48.99872], [11.0011, 48.9984]
+            ]], 14),
+            feature('courtyard-gabled', 'gabled', 90, 4, [
+                box(11.00155, 48.9984, 0.00036, 0.00032),
+                box(11.00164, 48.99849, 0.00018, 0.00014).reverse()
+            ], 16)
+        ]
+    };
+
+    const DATA = {
+        'fill-extrusion-roof-shape': ['get', 'roof_shape'],
+        'fill-extrusion-roof-height': ['get', 'roof_height'],
+        'fill-extrusion-roof-direction': ['get', 'roof_direction']
+    };
+
+    const SHAPES_VIEW = {center: [10.99995, 49.00005], zoom: 17.6, pitch: 60, bearing: -20};
+    const COMPLEX_VIEW = {center: [11.00145, 48.99848], zoom: 18.4, pitch: 55, bearing: -25};
+
+    const map = new maplibregl.Map({
+        container: 'map',
+        ...SHAPES_VIEW,
+        hash: true,
+        maxPitch: 85,
+        style: {
+            version: 8,
+            sources: {
+                shapes: {type: 'geojson', data: shapes},
+                complex: {type: 'geojson', data: complex}
+            },
+            light: {anchor: 'viewport', position: [1.15, 210, 30], intensity: 0.5},
+            layers: [
+                {id: 'background', type: 'background', paint: {'background-color': '#eef0e8'}},
+                ...['shapes', 'complex'].map((source) => ({
+                    id: `${source}-roofs`,
+                    type: 'fill-extrusion',
+                    source,
+                    layout: {
+                        'fill-extrusion-roof-shape': DATA['fill-extrusion-roof-shape'],
+                        'fill-extrusion-roof-direction': DATA['fill-extrusion-roof-direction']
+                    },
+                    paint: {
+                        'fill-extrusion-roof-height': DATA['fill-extrusion-roof-height'],
+                        'fill-extrusion-height': ['get', 'height'],
+                        'fill-extrusion-base': ['get', 'min_height'],
+                        'fill-extrusion-color': ['get', 'facade_color'],
+                        'fill-extrusion-roof-color': ['get', 'roof_color'],
+                        'fill-extrusion-vertical-gradient': true
+                    }
+                }))
+            ]
+        }
+    });
+
+    map.addControl(new maplibregl.NavigationControl({visualizePitch: true}));
+
+    const LAYERS = ['shapes-roofs', 'complex-roofs'];
+    const $ = (id) => document.getElementById(id);
+
+    function setRoofProperty(name, value) {
+        const setProperty = name === 'fill-extrusion-roof-height' ? 'setPaintProperty' : 'setLayoutProperty';
+        for (const layer of LAYERS) map[setProperty](layer, name, value ?? DATA[name]);
+    }
+
+    $('shape').addEventListener('change', (event) => {
+        setRoofProperty('fill-extrusion-roof-shape', event.target.value || undefined);
+    });
+
+    $('height').addEventListener('input', (event) => {
+        const value = Number(event.target.value);
+        $('height-value').textContent = `${value} m`;
+        setRoofProperty('fill-extrusion-roof-height', value);
+    });
+
+    function applyDirection() {
+        const mode = $('direction-mode').value;
+        const value = Number($('direction').value);
+        $('direction').disabled = mode !== 'custom';
+        $('direction-value').textContent = mode === 'custom' ? `${value}°` : '';
+        const name = 'fill-extrusion-roof-direction';
+        if (mode === 'data') setRoofProperty(name);
+        else for (const layer of LAYERS) map.setLayoutProperty(layer, name, mode === 'custom' ? value : undefined);
+    }
+
+    $('direction-mode').addEventListener('change', applyDirection);
+    $('direction').addEventListener('input', applyDirection);
+
+    $('view-shapes').addEventListener('click', () => map.flyTo(SHAPES_VIEW));
+    $('view-complex').addEventListener('click', () => map.flyTo(COMPLEX_VIEW));
+
+    $('roof-color').addEventListener('change', (event) => {
+        for (const layer of LAYERS) {
+            map.setPaintProperty(layer, 'fill-extrusion-roof-color', event.target.checked ? ['get', 'roof_color'] : undefined);
+        }
+    });
+
+    $('reset').addEventListener('click', () => {
+        $('shape').value = '';
+        $('direction-mode').value = 'data';
+        $('height-value').textContent = 'data';
+        applyDirection();
+        for (const name of Object.keys(DATA)) setRoofProperty(name);
+    });
+
+    const labels = [...shapes.features, ...complex.features].map((feature) => {
+        const element = document.createElement('div');
+        element.className = 'roof-label';
+        element.textContent = feature.properties.id.replace(/^building-/, '');
+        return new maplibregl.Marker({element, anchor: 'top'})
+            .setLngLat(southernmostPoint(feature.geometry))
+            .addTo(map);
+    });
+
+    $('labels').addEventListener('change', (event) => {
+        for (const label of labels) label.getElement().style.display = event.target.checked ? '' : 'none';
+    });
+
+    function southernmostPoint(geometry) {
+        const ring = geometry.type === 'Polygon' ? geometry.coordinates[0] : geometry.coordinates[0][0];
+        const lng = ring.reduce((sum, [x]) => sum + x, 0) / ring.length;
+        const lat = Math.min(...ring.map(([, y]) => y));
+        return [lng, lat];
+    }
+</script>
+</body>
+</html>

@@ -6,6 +6,7 @@ import {ImageAtlas} from '../render/image_atlas.ts';
 import {GlyphAtlas} from '../render/glyph_atlas.ts';
 import {EvaluationParameters} from '../style/evaluation_parameters.ts';
 import {OverscaledTileID} from '../tile/tile_id.ts';
+import {slicedTileBuffer} from './vector_tile_overzoomed.ts';
 import {type GetDashesResponse, MessageType, type GetImagesResponse} from '../util/actor_messages.ts';
 
 import type {Bucket, PopulateParameters} from '../data/bucket.ts';
@@ -20,6 +21,7 @@ import type {
 import type {PromoteIdSpecification} from '@maplibre/maplibre-gl-style-spec';
 import type {VectorTileLike} from '@maplibre/vt-pbf';
 import type {SubdivisionGranularitySetting} from '../render/subdivision_granularity_settings.ts';
+import type {RoofOutlines} from './roof_outlines.ts';
 export class WorkerTile {
     tileID: OverscaledTileID;
     uid: string | number;
@@ -29,6 +31,9 @@ export class WorkerTile {
     source: string;
     promoteId: PromoteIdSpecification;
     overscaling: number;
+    tileBuffer?: number;
+    overzoomed: boolean;
+    roofOutlines?: RoofOutlines;
     showCollisionBoxes: boolean;
     collectResourceTiming: boolean;
     returnDependencies: boolean;
@@ -53,6 +58,7 @@ export class WorkerTile {
         this.tileSize = params.tileSize;
         this.source = params.source;
         this.overscaling = this.tileID.overscaleFactor();
+        this.overzoomed = !!params.overzoomParameters;
         this.showCollisionBoxes = params.showCollisionBoxes;
         this.collectResourceTiming = !!params.collectResourceTiming;
         this.returnDependencies = !!params.returnDependencies;
@@ -78,7 +84,8 @@ export class WorkerTile {
             glyphDependencies: {},
             dashDependencies: {},
             availableImages,
-            subdivisionGranularity
+            subdivisionGranularity,
+            roofOutlines: this.roofOutlines
         };
 
         const layerFamilies = layerIndex.familiesBySource[this.source];
@@ -94,6 +101,7 @@ export class WorkerTile {
             }
 
             const sourceLayerIndex = sourceLayerCoder.encode(sourceLayerId);
+            const tileBuffer = this.overzoomed ? slicedTileBuffer(sourceLayer.extent) : this.tileBuffer;
             const features = [];
             for (let index = 0; index < sourceLayer.length; index++) {
                 const feature = sourceLayer.feature(index);
@@ -118,7 +126,8 @@ export class WorkerTile {
                     overscaling: this.overscaling,
                     collisionBoxArray: this.collisionBoxArray,
                     sourceLayerIndex,
-                    sourceID: this.source
+                    sourceID: this.source,
+                    tileBuffer
                 });
 
                 bucket.populate(features, options, this.tileID.canonical);

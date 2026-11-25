@@ -46,6 +46,18 @@ export function drawFillExtrusion(tileManager: TileManager, layer: FillExtrusion
     }
 }
 
+const ROOF_DEFINES = ['#define HAS_ROOFS'];
+const ROOF_COLOR_DEFINES = ['#define HAS_ROOF_COLOR'];
+const ROOF_AND_COLOR_DEFINES = ['#define HAS_ROOFS', '#define HAS_ROOF_COLOR'];
+const NO_DEFINES: string[] = [];
+
+function extraDefines(usesRoofs: boolean, hasRoofColor: boolean): string[] {
+    if (usesRoofs && hasRoofColor) return ROOF_AND_COLOR_DEFINES;
+    if (usesRoofs) return ROOF_DEFINES;
+    if (hasRoofColor) return ROOF_COLOR_DEFINES;
+    return NO_DEFINES;
+}
+
 function drawExtrusionTiles(
     tileManager: TileManager,
     layer: FillExtrusionStyleLayer,
@@ -62,6 +74,7 @@ function drawExtrusionTiles(
     const crossfade = layer.getCrossfadeParameters();
     const constantPattern = patternProperty.constantOr(null);
     const projectedCamera = frameRenderContext.projectedCamera;
+    const hasRoofColor = layer.hasRoofColor();
 
     for (const coord of coords) {
         const tile = tileManager.getTile(coord);
@@ -70,7 +83,8 @@ function drawExtrusionTiles(
 
         const terrainData = frameRenderContext.getTerrainDataForTile(coord);
         const programConfiguration = bucket.programConfigurations.get(layer.id);
-        const program = frameRenderContext.useProgram(image ? 'fillExtrusionPattern' : 'fillExtrusion', programConfiguration);
+        const roofDefines = extraDefines(bucket.usesRoofAttributes, hasRoofColor);
+        const program = frameRenderContext.useProgram(image ? 'fillExtrusionPattern' : 'fillExtrusion', programConfiguration, false, roofDefines);
 
         if (image) {
             context.activeTexture.set(gl.TEXTURE0);
@@ -96,6 +110,7 @@ function drawExtrusionTiles(
         program.draw(context, context.gl.TRIANGLES, depthMode, stencilMode, colorMode, CullFaceMode.backCCW,
             uniformValues, terrainData, projectionData, layer.id, bucket.layoutVertexBuffer, bucket.indexBuffer,
             bucket.segments, layer.paint, frameRenderContext.projectedCamera.zoom,
-            programConfiguration, frameRenderContext.terrain && bucket.centroidVertexBuffer);
+            programConfiguration, frameRenderContext.terrain && bucket.centroidVertexBuffer,
+            bucket.usesRoofAttributes ? bucket.roofVertexBuffer : null);
     }
 }

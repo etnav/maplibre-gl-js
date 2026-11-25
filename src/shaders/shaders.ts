@@ -163,7 +163,8 @@ export const shaders: {
 function prepare(fragmentSource: string, vertexSource: string): PreparedShader {
     const re = /#pragma maplibre: ([\w]+) ([\w]+) ([\w]+) ([\w]+)/g;
 
-    const vertexAttributes = vertexSource.match(/in ([\w]+) ([\w]+)/g);
+    const matchedAttributes = vertexSource.match(/in ([\w]+) ([\w]+)/g);
+    const vertexAttributes = matchedAttributes ? Array.from(new Set(matchedAttributes)) : null;
     const fragmentUniforms = fragmentSource.match(/uniform ([\w]+) ([\w]+)([\s]*)([\w]*)/g);
     const vertexUniforms = vertexSource.match(/uniform ([\w]+) ([\w]+)([\s]*)([\w]*)/g);
     const shaderUniforms = vertexUniforms ? vertexUniforms.concat(fragmentUniforms) : fragmentUniforms;

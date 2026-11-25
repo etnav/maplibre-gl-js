@@ -1,0 +1,47 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "height": 256,
+      "width": 512
+    }
+  },
+  "center": [11.0015, 49.00184],
+  "zoom": 15.2,
+  "pitch": 55,
+  "bearing": 20,
+  "sources": {
+    "roofs": {
+      "type": "vector",
+      "minzoom": 14,
+      "maxzoom": 14,
+      "tiles": ["local://tiles/roofs/{z}/{x}/{y}.mvt"]
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#ffffff"
+      }
+    },
+    {
+      "id": "buildings",
+      "type": "fill-extrusion",
+      "source": "roofs",
+      "source-layer": "building",
+      "layout": {
+        "fill-extrusion-roof-shape": ["coalesce", ["get", "roof_shape"], "flat"],
+        "fill-extrusion-roof-direction": ["to-number", ["get", "roof_direction"]]
+      },
+      "paint": {
+        "fill-extrusion-roof-height": ["to-number", ["get", "roof_height"]],
+        "fill-extrusion-height": ["to-number", ["get", "height"]],
+        "fill-extrusion-base": ["to-number", ["coalesce", ["get", "min_height"], 0]],
+        "fill-extrusion-color": ["coalesce", ["get", "facade_color"], "#c86432"],
+        "fill-extrusion-roof-color": ["coalesce", ["get", "roof_color"], "#8b4513"]
+      }
+    }
+  ]
+}

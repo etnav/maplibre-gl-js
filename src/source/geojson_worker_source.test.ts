@@ -14,6 +14,7 @@ import type {Actor, IActor} from '../util/actor.ts';
 import type {TileParameters, WorkerTileParameters, WorkerTileResult, WorkerTileWithData} from './worker_source.ts';
 import type {LayerSpecification} from '@maplibre/maplibre-gl-style-spec';
 import type {WorkerTile} from './worker_tile.ts';
+import type {FillExtrusionBucket} from '../data/bucket/fill_extrusion_bucket.ts';
 
 const actor = {send: () => {}} as any as Actor;
 
@@ -273,6 +274,35 @@ describe('geojson tile worker source', () => {
         } as any as WorkerTileParameters);
 
         expect(result).toBeNull();
+    });
+
+    test('GeoJSONWorkerSource.loadTile tells its buckets the buffer the tiles were clipped at', async () => {
+        const layerIndex = new StyleLayerIndex([{
+            id: 'extrusion',
+            source: 'source',
+            'source-layer': GEOJSON_TILE_LAYER_NAME,
+            type: 'fill-extrusion',
+        }]);
+        const source = new GeoJSONWorkerSource(createFakeActor(), layerIndex, []);
+        const geoJson = {
+            type: 'FeatureCollection',
+            features: [{
+                type: 'Feature',
+                properties: {},
+                geometry: {type: 'Polygon', coordinates: [[[-1, -1], [1, -1], [1, 1], [-1, 1], [-1, -1]]]},
+            }],
+        } as GeoJSON.GeoJSON;
+        await source.loadData({source: 'source', data: geoJson, geojsonVtOptions: {buffer: 512, extent: 8192}} as LoadGeoJSONParameters);
+
+        const result = await source.loadTile({
+            source: 'source',
+            uid: 0,
+            tileID: {overscaledZ: 0, wrap: 0, canonical: {x: 0, y: 0, z: 0, w: 0}},
+            subdivisionGranularity: SubdivisionGranularitySetting.noSubdivision,
+        } as any as WorkerTileParameters) as WorkerTileWithData;
+
+        expect(result.buckets).toHaveLength(1);
+        expect((result.buckets[0] as FillExtrusionBucket).tileBuffer).toBe(512);
     });
 
     test('GeoJSONWorkerSource.loadTile throws error when data has not been loaded', async () => {

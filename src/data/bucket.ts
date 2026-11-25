@@ -14,6 +14,7 @@ import type {VectorTileFeatureLike, VectorTileLayerLike} from '@maplibre/vt-pbf'
 import type {GetImagesResponse} from '../util/actor_messages.ts';
 import type {GlyphPositions} from '../render/glyph_atlas.ts';
 import type {GlyphMap} from '../style/style_glyph.ts';
+import type {RoofOutlines} from '../source/roof_outlines.ts';
 
 export type BucketParameters<Layer extends TypedStyleLayer> = {
     index: number;
@@ -24,6 +25,7 @@ export type BucketParameters<Layer extends TypedStyleLayer> = {
     collisionBoxArray: CollisionBoxArray;
     sourceLayerIndex: number;
     sourceID: string;
+    tileBuffer?: number;
 };
 
 export type PopulateParameters = {
@@ -43,6 +45,7 @@ export type PopulateParameters = {
     dashDependencies: Record<string, {round: boolean; dasharray: number[]}>;
     availableImages: string[];
     subdivisionGranularity: SubdivisionGranularitySetting;
+    roofOutlines?: RoofOutlines;
 };
 
 /**

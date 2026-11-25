@@ -17,6 +17,14 @@ layout(location = 1) in ivec4 a_normal_ed;
     layout(location = 2) in vec2 a_centroid;
 #endif
 
+#ifdef HAS_ROOFS
+    #ifdef TERRAIN3D
+        layout(location = 3) in vec2 a_roof;
+    #else
+        layout(location = 2) in vec2 a_roof;
+    #endif
+#endif
+
 #ifdef GLOBE
     out vec3 v_sphere_pos;
 #endif
@@ -32,6 +40,9 @@ out vec4 v_lighting;
 #pragma maplibre: define lowp float pixel_ratio_from
 #pragma maplibre: define lowp float pixel_ratio_to
 #pragma maplibre: define highp float opacity
+#ifdef HAS_ROOFS
+    #pragma maplibre: define highp float roof_height
+#endif
 
 void main() {
     #pragma maplibre: initialize lowp float base
@@ -41,6 +52,9 @@ void main() {
     #pragma maplibre: initialize lowp float pixel_ratio_from
     #pragma maplibre: initialize lowp float pixel_ratio_to
     #pragma maplibre: initialize highp float opacity
+    #ifdef HAS_ROOFS
+        #pragma maplibre: initialize highp float roof_height
+    #endif
 
     opacity = clamp(opacity, 0.0, 1.0);
     if (opacity <= 0.0) {
@@ -86,6 +100,16 @@ void main() {
 
     float t = float(a_normal_ed.x & 1);
     float elevation = t > 0.0 ? height : base;
+
+    #ifdef HAS_ROOFS
+        if (a_roof.x >= 0.0) {
+            float roof_R = a_roof.y < 0.0 ? max(0.0, roof_height) : a_roof.y / 100.0;
+            float roof_R_prime = min(roof_R, max(0.0, gradient_height - gradient_base));
+            elevation = height - roof_R_prime * (1.0 - a_roof.x / 32767.0);
+            normal = vec3(normal.xy * roof_R_prime, normal.z);
+        }
+    #endif
+
     vec2 posInTile = a_pos + u_fill_translate;
 
     #ifdef GLOBE
@@ -97,7 +121,7 @@ void main() {
         gl_Position = u_projection_matrix * vec4(posInTile, elevation, 1.0);
     #endif
 
-    vec2 pos = a_normal_ed.x == 1 && a_normal_ed.y == 0 && a_normal_ed.z == 16384
+    vec2 pos = a_normal_ed.z != 0
         ? a_pos // extrusion top - note the lack of u_fill_translate, because translation should not affect the pattern
         : vec2(edgedistance, elevation * u_height_factor); // extrusion side
 
@@ -105,7 +129,12 @@ void main() {
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, toScale * display_size_b, tileRatio, pos);
 
     v_lighting = vec4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal / 16383.0, u_lightpos), 0.0, 1.0);
+    #ifdef HAS_ROOFS
+        vec3 normalForLighting = normalize(normal / 16384.0);
+    #else
+        vec3 normalForLighting = normal / 16383.0;
+    #endif
+    float directional = clamp(dot(normalForLighting, u_lightpos), 0.0, 1.0);
     directional = mix((1.0 - u_lightintensity), max((0.5 + u_lightintensity), 1.0), directional);
 
     if (normal.z == 0.0) {

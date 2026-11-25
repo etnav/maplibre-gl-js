@@ -5,7 +5,7 @@ import {fakeServer, type FakeServer} from 'nise';
 import {VectorTileSource} from './vector_tile_source.ts';
 import {AJAXError} from '../util/ajax.ts';
 import {AbortError} from '../util/abort_error.ts';
-import {OverscaledTileID} from '../tile/tile_id.ts';
+import {CanonicalTileID, OverscaledTileID} from '../tile/tile_id.ts';
 import {Tile} from '../tile/tile.ts';
 import {Evented} from '../util/evented.ts';
 import {RequestManager} from '../util/request_manager.ts';
@@ -236,6 +236,15 @@ describe('VectorTileSource', () => {
         source.loadTile(tile);
         expect(transformSpy).toHaveBeenCalledTimes(1);
         expect(transformSpy).toHaveBeenCalledWith('http://example.com/10/5/5.png', 'Tile');
+    });
+
+    test('transforms the request for a tile it is asked for by id', async () => {
+        const source = createSource(
+            {tiles: ['http://example.com/{z}/{x}/{y}.png'], scheme: 'tms'},
+            (url: string) => ({url, headers: {Authorization: 'token'}}));
+        await waitForMetadataEvent(source);
+
+        await expect(source.tileRequest(new CanonicalTileID(10, 5, 5))).resolves.toEqual({url: 'http://example.com/10/5/1018.png', headers: {Authorization: 'token'}});
     });
 
     test('can asynchronously transform tile request', async () => {

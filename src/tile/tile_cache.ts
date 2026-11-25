@@ -241,6 +241,10 @@ export class BoundedLRUCache<K, V> {
         this.map.set(key, value);
     }
 
+    delete(key: K): void {
+        this.map.delete(key);
+    }
+
     clear(): void {
         this.map.clear();
     }

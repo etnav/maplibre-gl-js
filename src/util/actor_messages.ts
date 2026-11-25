@@ -5,7 +5,7 @@ import type {StyleImage} from '../style/style_image.ts';
 import type {GlyphMap, GlyphRequests} from '../style/style_glyph.ts';
 import type {PluginState} from '../source/rtl_text_plugin_status.ts';
 import type {LayerSpecification} from '@maplibre/maplibre-gl-style-spec';
-import type {OverscaledTileID} from '../tile/tile_id.ts';
+import type {CanonicalTileID, OverscaledTileID} from '../tile/tile_id.ts';
 import type {GetResourceResponse, RequestParameters} from './ajax.ts';
 import type {DashEntry} from '../render/line_atlas.ts';
 
@@ -90,6 +90,14 @@ export type GetDashesParameters = {
 export type GetDashesResponse = {[dashId: string]: DashEntry};
 
 /**
+ * Parameters needed to get tile requests for a source
+ */
+export type GetTileRequestsParameters = {
+    source: string;
+    tileIDs: CanonicalTileID[];
+};
+
+/**
  * All the possible message types that can be sent to and from the worker
  */
 export const enum MessageType {
@@ -117,6 +125,7 @@ export const enum MessageType {
     removeDEMTile = 'RDT',
     getResource = 'GR',
     ping = 'PI',
+    getTileRequests = 'GTR',
 }
 
 /**
@@ -148,6 +157,7 @@ export type RequestResponseMessageMap = {
     [MessageType.getResource]: [RequestParameters, GetResourceResponse<any>];
     [MessageType.getDashes]: [GetDashesParameters, GetDashesResponse];
     [MessageType.ping]: [undefined, void];
+    [MessageType.getTileRequests]: [GetTileRequestsParameters, RequestParameters[]];
 };
 
 /**

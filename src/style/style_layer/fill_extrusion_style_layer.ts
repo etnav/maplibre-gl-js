@@ -6,7 +6,7 @@ import properties, {type FillExtrusionLayoutPropsPossiblyEvaluated, type FillExt
 import Point from '@mapbox/point-geometry';
 import {getCameraMath} from '../../camera/camera_math_factory.ts';
 
-import type {Layout, Transitionable, Transitioning, PossiblyEvaluated} from '../properties.ts';
+import type {Layout, Transitionable, Transitioning, PossiblyEvaluated, PropertyValue} from '../properties.ts';
 import type {LayerSpecification} from '@maplibre/maplibre-gl-style-spec';
 import type {BucketParameters} from '../../data/bucket.ts';
 import type {FillExtrusionLayoutProps, FillExtrusionPaintProps} from './fill_extrusion_style_layer_properties.g.ts';
@@ -29,6 +29,23 @@ export class FillExtrusionStyleLayer extends StyleLayer {
 
     constructor(layer: LayerSpecification, globalState: Record<string, any>) {
         super(layer, properties, globalState);
+    }
+
+    hasRoofColor(): boolean {
+        const roofColor = this.paint.get('fill-extrusion-roof-color').value;
+        return roofColor.kind !== 'constant' || roofColor.value !== undefined;
+    }
+
+    override _handleOverridablePaintPropertyUpdate<T, R>(name: string, oldValue: PropertyValue<T, R>, newValue: PropertyValue<T, R>): boolean {
+        if (name !== 'fill-extrusion-roof-color' || oldValue.isDataDriven() || newValue.isDataDriven()) {
+            return false;
+        }
+        return (oldValue.value === undefined) !== (newValue.value === undefined);
+    }
+
+    mayDrawPitchedRoofs(): boolean {
+        const shape = this.layout.get('fill-extrusion-roof-shape');
+        return !shape.isConstant() || shape.constantOr('flat') !== 'flat';
     }
 
     createBucket(parameters: BucketParameters<FillExtrusionStyleLayer>): FillExtrusionBucket {

@@ -360,6 +360,11 @@ export class VectorTileSource extends Evented<SourceEventType> implements Source
         };
     }
 
+    /** @internal */
+    async tileRequest(tileID: CanonicalTileID): Promise<RequestParameters> {
+        return this._getTileRequest(tileID);
+    }
+
     private async _getTileRequest(tileID: CanonicalTileID): Promise<RequestParameters> {
         const url = tileID.url(this.tiles, this.map.getPixelRatio(), this.scheme, this.map.style.projection.worldCoordinateHelper.tileMatrixSet);
         const request = await this.map._requestManager.transformRequest(url, ResourceType.Tile);

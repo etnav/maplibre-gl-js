@@ -9,6 +9,10 @@ export const centroidAttributes: StructArrayLayout = createLayout([
     {name: 'a_centroid', components: 2, type: 'Int16'}
 ], 4);
 
+export const roofAttributes: StructArrayLayout = createLayout([
+    {name: 'a_roof', components: 2, type: 'Int16'}
+], 4);
+
 export default layout;
 export const members: StructArrayMember[] = layout.members;
 export const size: number = layout.size;

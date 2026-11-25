@@ -1,7 +1,7 @@
+import Point from '@mapbox/point-geometry';
 import {warnOnce, clamp} from '../util/util.ts';
 import {EXTENT} from './extent.ts';
 
-import type Point from '@mapbox/point-geometry';
 import type {VectorTileFeatureLike} from '@maplibre/vt-pbf';
 
 // These bounds define the minimum and maximum supported coordinate values.
@@ -38,4 +38,10 @@ export function loadGeometry(feature: VectorTileFeatureLike): Point[][] {
         }
     }
     return geometry;
+}
+
+/** Scales `rings` from layer `extent` to `EXTENT` without clamping to tile bounds. */
+export function scaleToExtent(rings: Point[][], extent: number): Point[][] {
+    const scale = EXTENT / extent;
+    return rings.map((ring) => ring.map((point) => new Point(Math.round(point.x * scale), Math.round(point.y * scale))));
 }

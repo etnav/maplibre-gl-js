@@ -1,14 +1,18 @@
 import {PbfReader} from 'pbf';
 import {VectorTile} from '@mapbox/vector-tile';
-import {fromVectorTileJs, type VectorTileLike} from '@maplibre/vt-pbf';
-import {type ExpiryData, getArrayBuffer} from '../util/ajax.ts';
+import {fromVectorTileJs, type VectorTileFeatureLike, type VectorTileLike} from '@maplibre/vt-pbf';
+import {type AJAXError, type ExpiryData, getArrayBuffer, type RequestParameters} from '../util/ajax.ts';
 import {WorkerTile} from './worker_tile.ts';
 import {WorkerTileState} from './worker_tile_state.ts';
 import {BoundedLRUCache} from '../tile/tile_cache.ts';
 import {ensureError} from '../util/util.ts';
 import {RequestPerformance} from '../util/request_performance.ts';
-import {VectorTileOverzoomed, sliceVectorTileLayer} from './vector_tile_overzoomed.ts';
+import {VectorTileOverzoomed, getSlicedPolygons, sliceVectorTileLayer} from './vector_tile_overzoomed.ts';
 import {MLTVectorTile} from './vector_tile_mlt.ts';
+import {featuresNeedingOutlines, gatherRoofOutlines, holdsPieceOf, outlinesInSlice, type RoofOutlines} from './roof_outlines.ts';
+import {DEFAULT_TILE_BUFFER} from '../data/extent_bounds.ts';
+import {MessageType} from '../util/actor_messages.ts';
+import {throwIfAborted} from '../util/abort_error.ts';
 
 import type {
     WorkerSource,
@@ -18,6 +22,9 @@ import type {
 } from '../source/worker_source.ts';
 import type {IActor} from '../util/actor.ts';
 import type {StyleLayerIndex} from '../style/style_layer_index.ts';
+import type {CanonicalTileID} from '../tile/tile_id.ts';
+
+const GATHERED_TILE_CACHE_SIZE = 32;
 
 export type LoadVectorTileResult = {
     vectorTile: VectorTileLike;
@@ -34,6 +41,7 @@ export class VectorTileWorkerSource implements WorkerSource {
     availableImages: string[];
     tileState: WorkerTileState;
     overzoomedTileResultCache: BoundedLRUCache<string, LoadVectorTileResult>;
+    gatheredTileCache: BoundedLRUCache<string, Promise<VectorTileLike | null>>;
 
     constructor(actor: IActor, layerIndex: StyleLayerIndex, availableImages: string[]) {
         this.actor = actor;
@@ -41,6 +49,7 @@ export class VectorTileWorkerSource implements WorkerSource {
         this.availableImages = availableImages;
         this.tileState = new WorkerTileState();
         this.overzoomedTileResultCache = new BoundedLRUCache<string, LoadVectorTileResult>(1000);
+        this.gatheredTileCache = new BoundedLRUCache<string, Promise<VectorTileLike | null>>(GATHERED_TILE_CACHE_SIZE);
     }
 
     /**
@@ -96,13 +105,19 @@ export class VectorTileWorkerSource implements WorkerSource {
             }
 
             const tileResult = this.loadVectorTile(params, tileResponse.data);
-            this.tileState.finishLoading(uid);
-            if (!tileResult) return null;
+            if (!tileResult) {
+                this.tileState.finishLoading(uid);
+                return null;
+            }
 
             let {vectorTile, rawData} = tileResult;
+            const clippedTile = vectorTile;
             if (overzoomParameters) {
                 ({vectorTile, rawData} = this._getOverzoomTile(params, vectorTile));
             }
+            workerTile.roofOutlines = await this._gatherRoofOutlines(params, vectorTile, clippedTile);
+            throwIfAborted(abortController.signal);
+            this.tileState.finishLoading(uid);
 
             const cacheControl = this._getExpiryData(tileResponse);
             const resourceTiming = this._finishRequestTiming(timing);
@@ -181,10 +196,15 @@ export class VectorTileWorkerSource implements WorkerSource {
      * @returns the overzoomed tile and its raw data
      */
     private _getOverzoomTile(params: WorkerTileParameters, maxZoomVectorTile: VectorTileLike): LoadVectorTileResult {
-        const {tileID, overzoomParameters} = params;
+        const {tileID, source, overzoomParameters} = params;
         const {maxZoomTileID} = overzoomParameters;
+        const layerFamilies = this.layerIndex.familiesBySource?.[source] ?? {};
+        const extrudedSourceLayers = Object.keys(layerFamilies)
+            .filter((sourceLayerId) => layerFamilies[sourceLayerId].some((family) => family[0].type === 'fill-extrusion'));
 
-        const cacheKey = `${maxZoomTileID.key}_${tileID.key}_${params.request?.url}`;
+        const cacheKey = extrudedSourceLayers.length ?
+            `${maxZoomTileID.key}_${tileID.key}_${params.request?.url}_${extrudedSourceLayers.join()}` :
+            `${maxZoomTileID.key}_${tileID.key}_${params.request?.url}`;
         const cachedOverzoomTile = this.overzoomedTileResultCache.get(cacheKey);
 
         if (cachedOverzoomTile) {
@@ -194,7 +214,8 @@ export class VectorTileWorkerSource implements WorkerSource {
         const overzoomedVectorTile = new VectorTileOverzoomed();
 
         for (const sourceLayer of Object.values(maxZoomVectorTile.layers)) {
-            const slicedTileLayer = sliceVectorTileLayer(sourceLayer, maxZoomTileID, tileID.canonical);
+            const keepPolygons = extrudedSourceLayers.includes(sourceLayer.name);
+            const slicedTileLayer = sliceVectorTileLayer(sourceLayer, maxZoomTileID, tileID.canonical, keepPolygons);
             if (slicedTileLayer.length > 0) {
                 overzoomedVectorTile.addLayer(slicedTileLayer);
             }
@@ -223,7 +244,59 @@ export class VectorTileWorkerSource implements WorkerSource {
 
         workerTile.showCollisionBoxes = params.showCollisionBoxes;
         workerTile.tileID = workerTile.tileID.unwrapTo(params.tileID.wrap);
+        workerTile.roofOutlines = await this._gatherRoofOutlines(params, workerTile.vectorTile);
         return await this._parseWorkerTile(workerTile, params);
+    }
+
+    /** Gathers unclipped building outlines from neighbouring tiles for tile-split pitched roofs. */
+    async _gatherRoofOutlines(params: WorkerTileParameters, tile: VectorTileLike, clippedTile?: VectorTileLike): Promise<RoofOutlines> {
+        const {source, tileID, overzoomParameters, promoteId} = params;
+        const families = this.layerIndex.familiesBySource?.[source];
+        if (!families) return {};
+
+        function holdsPiece(feature: VectorTileFeatureLike): boolean {
+            return overzoomParameters ?
+                (getSlicedPolygons(feature)?.pieces.length ?? 0) > 0 :
+                holdsPieceOf(feature, DEFAULT_TILE_BUFFER);
+        }
+
+        const request = featuresNeedingOutlines(tile, families, tileID.overscaledZ, tileID.canonical, promoteId, this.availableImages, holdsPiece);
+        if (Object.keys(request).length === 0) return {};
+
+        const clippedTileID = overzoomParameters?.maxZoomTileID ?? tileID.canonical;
+        const clippedRequest = overzoomParameters?.overzoomRequest ?? params.request;
+        if (clippedTile) this.gatheredTileCache.set(clippedRequest.url, Promise.resolve(clippedTile));
+        const clipped = overzoomParameters ? await this._loadGatheredTile(params, clippedRequest).catch(() => null) : tile;
+        if (!clipped) return {};
+
+        const outlines = await gatherRoofOutlines(clipped, clippedTileID, request, DEFAULT_TILE_BUFFER, promoteId,
+            async (id) => this._loadGatheredTile(params, await this._requestTileOfSource(source, id)));
+        return overzoomParameters ? outlinesInSlice(outlines, clippedTileID, tileID.canonical) : outlines;
+    }
+
+    async _requestTileOfSource(source: string, tileID: CanonicalTileID): Promise<RequestParameters> {
+        const [request] = await this.actor.sendAsync({type: MessageType.getTileRequests, data: {source, tileIDs: [tileID]}});
+        return request;
+    }
+
+    _loadGatheredTile(params: WorkerTileParameters, request: RequestParameters): Promise<VectorTileLike | null> {
+        const cached = this.gatheredTileCache.get(request.url);
+        if (cached) return cached;
+
+        const loading = this._fetchGatheredTile(params, request);
+        this.gatheredTileCache.set(request.url, loading);
+        loading.catch(() => this.gatheredTileCache.delete(request.url));
+        return loading;
+    }
+
+    async _fetchGatheredTile(params: WorkerTileParameters, request: RequestParameters): Promise<VectorTileLike | null> {
+        try {
+            const response = await getArrayBuffer(request, new AbortController());
+            return this.loadVectorTile({...params, request}, response.data).vectorTile;
+        } catch (err) {
+            if ((err as AJAXError).status === 404) return null;
+            throw err;
+        }
     }
 
     /**

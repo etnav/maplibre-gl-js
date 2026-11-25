@@ -11,9 +11,14 @@ import {ABORT_ERROR} from '../util/abort_error.ts';
 import {SubdivisionGranularitySetting} from '../render/subdivision_granularity_settings.ts';
 import {OverscaledTileID, CanonicalTileID} from '../tile/tile_id.ts';
 import {VectorTile} from '@mapbox/vector-tile';
+import {fromVectorTileJs, GeoJSONWrapper} from '@maplibre/vt-pbf';
+import {EXTENT} from '../data/extent.ts';
+import {type ActorMessage, type GetTileRequestsParameters, MessageType} from '../util/actor_messages.ts';
 
+import type {LayerSpecification} from '@maplibre/maplibre-gl-style-spec';
 import type {TileParameters, WorkerTileParameters, WorkerTileWithData} from './worker_source.ts';
 import type {IActor} from '../util/actor.ts';
+import type {FillExtrusionBucket} from '../data/bucket/fill_extrusion_bucket.ts';
 
 /** Reads a tile fixture into an `ArrayBuffer` of the test's realm, which the fake server accepts as a response body. */
 function readTileFixture(file: string): ArrayBuffer {
@@ -490,4 +495,141 @@ describe('vector tile worker source', () => {
         expect(res).toBeDefined();
         expect(res.etagUnmodified).toBeUndefined();
     });
+
+    test('VectorTileWorkerSource gives a building the same pitched roof in the overzoomed tiles on both sides of a border', async () => {
+        serveBuildingTile(server, [992, 400, 1200, 500]);
+        const source = new VectorTileWorkerSource(actor, buildingLayerIndex('gabled'), []);
+
+        for (const x of [0, 1]) {
+            const caps = roofCapVertices(await loadOverzoomedBucket(server, source, 16, x));
+
+            expect(caps.some(({fraction}) => fraction === 1)).toBe(true);
+            for (const {y, fraction} of caps) {
+                expect(fraction).toBeCloseTo(1 - Math.abs(y - 3600) / 400, 2);
+            }
+        }
+    });
+
+    test('VectorTileWorkerSource gives a building split between two tiles the roof of its whole outline in both', async () => {
+        server.respondImmediately = true;
+        serveBuildingTile(server, [3796, 1000, 4160, 1400], 0);
+        serveBuildingTile(server, [-64, 1000, 300, 1400], 1);
+        const source = new VectorTileWorkerSource(tileRequestActor(), buildingLayerIndex('hipped'), []);
+
+        for (const [x, border] of [[0, EXTENT], [1, 0]]) {
+            const caps = roofCapVertices(await loadBucket(source, x));
+
+            expect(caps.some(({fraction}) => fraction === 1)).toBe(true);
+            for (const cap of caps) {
+                expect(cap.fraction).toBeCloseTo(Math.min(400 - Math.abs(cap.y - 2400), 600 - Math.abs(cap.x - border)) / 400, 2);
+            }
+        }
+    });
+
+    test('VectorTileWorkerSource gives a building split between two max-zoom tiles the roof of its whole outline in the tiles sliced from both', async () => {
+        server.respondImmediately = true;
+        serveBuildingTile(server, [3796, 1000, 4160, 1400], 0);
+        serveBuildingTile(server, [-64, 1000, 300, 1400], 1);
+        const source = new VectorTileWorkerSource(tileRequestActor(), buildingLayerIndex('hipped'), []);
+
+        for (const [x, border] of [[1, EXTENT], [2, 0]]) {
+            const caps = roofCapVertices(await loadOverzoomedBucket(server, source, 15, x));
+
+            expect(caps.some(({fraction}) => fraction === 1)).toBe(true);
+            for (const cap of caps) {
+                expect(cap.fraction).toBeCloseTo(Math.min(800 - Math.abs(cap.y - 4800), 1200 - Math.abs(cap.x - border)) / 800, 2);
+            }
+        }
+    });
+
+    test('VectorTileWorkerSource gives a building a flat cap at every overzoomed level where the tile holding the rest of it fails to load', async () => {
+        server.respondImmediately = true;
+        serveBuildingTile(server, [-64, 400, 100, 500]);
+        server.respondWith('http://localhost:2900/14/16383/0.pbf', [500, {}, '']);
+        const source = new VectorTileWorkerSource(tileRequestActor(), buildingLayerIndex('gabled'), []);
+
+        for (const z of [15, 16]) {
+            const caps = roofCapVertices(await loadOverzoomedBucket(server, source, z, 0));
+
+            expect(caps.length).toBeGreaterThan(0);
+            for (const {fraction} of caps) {
+                expect(fraction).toBeCloseTo(0.5, 3);
+            }
+        }
+    });
 });
+
+function serveBuildingTile(server: FakeServer, [x0, y0, x1, y1]: [number, number, number, number], x = 0) {
+    const building = new GeoJSONWrapper([{
+        type: 3,
+        geometry: [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]],
+        tags: {},
+        id: 1,
+    }], {version: 2, extent: 4096});
+    building.name = 'building';
+    const maxZoomTile = fromVectorTileJs({layers: {building}});
+    server.respondWith(`http://localhost:2900/14/${x}/0.pbf`, (request) => {
+        request.respond(200, {'Content-Type': 'application/pbf'}, maxZoomTile.slice().buffer as any);
+    });
+}
+
+function tileRequestActor(): IActor {
+    return {
+        sendAsync: (message: ActorMessage<MessageType>) => Promise.resolve(message.type === MessageType.getTileRequests ?
+            (message.data as GetTileRequestsParameters).tileIDs.map(({z, x, y}) => ({url: `http://localhost:2900/${z}/${x}/${y}.pbf`})) :
+            {}),
+    } as IActor;
+}
+
+function buildingLayerIndex(shape: string): StyleLayerIndex {
+    return new StyleLayerIndex([{
+        id: 'buildings',
+        source: 'source',
+        'source-layer': 'building',
+        type: 'fill-extrusion',
+        layout: {
+            'fill-extrusion-roof-shape': shape,
+            'fill-extrusion-roof-direction': 0,
+        },
+        paint: {'fill-extrusion-height': 20, 'fill-extrusion-roof-height': 5},
+    } as LayerSpecification]);
+}
+
+async function loadBucket(source: VectorTileWorkerSource, x: number): Promise<FillExtrusionBucket> {
+    const {buckets} = await source.loadTile({
+        source: 'source',
+        uid: `14/${x}`,
+        tileID: new OverscaledTileID(14, 0, 14, x, 0),
+        request: {url: `http://localhost:2900/14/${x}/0.pbf`},
+        subdivisionGranularity: SubdivisionGranularitySetting.noSubdivision,
+    } as any as WorkerTileParameters) as WorkerTileWithData;
+    return buckets[0] as FillExtrusionBucket;
+}
+
+async function loadOverzoomedBucket(server: FakeServer, source: VectorTileWorkerSource, z: number, x: number): Promise<FillExtrusionBucket> {
+    const maxZoomX = x >> (z - 14);
+    const promise = source.loadTile({
+        source: 'source',
+        uid: `${z}/${x}`,
+        tileID: new OverscaledTileID(z, 0, z, x, 0),
+        subdivisionGranularity: SubdivisionGranularitySetting.noSubdivision,
+        overzoomParameters: {
+            maxZoomTileID: new CanonicalTileID(14, maxZoomX, 0),
+            overzoomRequest: {url: `http://localhost:2900/14/${maxZoomX}/0.pbf`},
+        },
+    } as any as WorkerTileParameters);
+    server.respond();
+    const {buckets} = await promise as WorkerTileWithData;
+    return buckets[0] as FillExtrusionBucket;
+}
+
+function roofCapVertices(bucket: FillExtrusionBucket): Array<{x: number; y: number; fraction: number}> {
+    const layout = bucket.layoutVertexArray.int16;
+    const roof = bucket.roofVertexArray.int16;
+    const caps: Array<{x: number; y: number; fraction: number}> = [];
+    for (let i = 0; i < bucket.layoutVertexArray.length; i++) {
+        if (layout[i * 6 + 4] <= 0) continue;
+        caps.push({x: layout[i * 6], y: layout[i * 6 + 1], fraction: roof[i * 2] / 32767});
+    }
+    return caps;
+}

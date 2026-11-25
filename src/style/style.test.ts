@@ -7,7 +7,7 @@ import {MapSourceDataEvent} from '../ui/events.ts';
 import {RGBAImage} from '../util/image.ts';
 import {rtlMainThreadPluginFactory} from '../source/rtl_text_plugin_main_thread.ts';
 import {browser} from '../util/browser.ts';
-import {OverscaledTileID} from '../tile/tile_id.ts';
+import {CanonicalTileID, OverscaledTileID} from '../tile/tile_id.ts';
 import {fakeServer, type FakeServer} from 'nise';
 import {ImageRequest} from '../util/image_request.ts';
 import {EvaluationParameters} from './evaluation_parameters.ts';
@@ -119,6 +119,27 @@ describe('Style', () => {
 
         expect(style.tileManagers['raster'].reload).not.toHaveBeenCalled();
         expect(style.tileManagers['vector'].reload).toHaveBeenCalled();
+    });
+});
+
+describe('Style.getTileRequests', () => {
+    test('returns the requests that load tiles of a vector source by id', async () => {
+        const style = createStyle();
+        const metadataLoaded = waitForEvent(style, 'data', (e) => e.sourceDataType === 'metadata');
+        style.loadJSON(createStyleJSON({sources: {vector: createSource()}}));
+        await metadataLoaded;
+
+        await expect(style.getTileRequests(0, {source: 'vector', tileIDs: [new CanonicalTileID(5, 3, 2)]}))
+            .resolves.toEqual([{url: 'http://example.com/5/3/2.png'}]);
+    });
+
+    test('rejects a source that cannot load tiles by id', async () => {
+        const style = createStyle();
+        style.loadJSON(createStyleJSON({sources: {geojson: createGeoJSONSource()}}));
+        await style.once('style.load');
+
+        await expect(style.getTileRequests(0, {source: 'geojson', tileIDs: [new CanonicalTileID(5, 3, 2)]}))
+            .rejects.toThrow('cannot load tiles by id');
     });
 });
 

@@ -35,12 +35,15 @@ import {
     MessageType,
     type GetGlyphsParameters,
     type GetImagesParameters,
-    type GetImagesResponse
+    type GetImagesResponse,
+    type GetTileRequestsParameters
 } from '../util/actor_messages.ts';
 import {createProjectionFromName} from '../geo/projection/projection_factory.ts';
 
 import type {Source} from '../source/source.ts';
 import type {GeoJSONSource} from '../source/geojson_source.ts';
+import type {VectorTileSource} from '../source/vector_tile_source.ts';
+import type {RequestParameters} from '../util/ajax.ts';
 import type {StyleLayer} from './style_layer.ts';
 import type {MapGeoJSONFeature, GeoJSONFeature} from '../util/vectortile_to_geojson.ts';
 import type Point from '@mapbox/point-geometry';
@@ -262,6 +265,9 @@ export class Style extends Evented<MapEventType> {
         });
         this.dispatcher.registerMessageHandler(MessageType.getDashes, (mapId, params) => {
             return this.getDashes(mapId, params);
+        });
+        this.dispatcher.registerMessageHandler(MessageType.getTileRequests, (mapId, params) => {
+            return this.getTileRequests(mapId, params);
         });
         this.imageManager = new ImageManager();
         this.imageManager.setEventedParent(this);
@@ -2101,6 +2107,13 @@ export class Style extends Evented<MapEventType> {
         return result;
     }
 
+    /** @internal */
+    async getTileRequests(mapId: string | number, params: GetTileRequestsParameters): Promise<RequestParameters[]> {
+        const source = this.tileManagers[params.source]?.getSource() as Partial<Pick<VectorTileSource, 'tileRequest'>> | undefined;
+        if (!source?.tileRequest) throw new Error(`Source "${params.source}" cannot load tiles by id`);
+        return Promise.all(params.tileIDs.map((tileID) => source.tileRequest(tileID)));
+    }
+
     /**
      * Add a sprite.
      *
@@ -2239,6 +2252,7 @@ export class Style extends Evented<MapEventType> {
         this.dispatcher.unregisterMessageHandler(MessageType.getGlyphs);
         this.dispatcher.unregisterMessageHandler(MessageType.getImages);
         this.dispatcher.unregisterMessageHandler(MessageType.getDashes);
+        this.dispatcher.unregisterMessageHandler(MessageType.getTileRequests);
         this.dispatcher.remove(true);
         this._listeners = {};
         this._oneTimeListeners = {};

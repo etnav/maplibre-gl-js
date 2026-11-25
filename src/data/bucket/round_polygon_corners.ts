@@ -27,8 +27,20 @@ export function roundPolygonCornersIfNeeded(polygon: Point[][], distanceInTileUn
  * @param canonical - Canonical tile ID used for meter to tile unit conversion
  */
 export function getTileUnitsForMeters(distanceInMeters: number, canonical: CanonicalTileID): number {
-    const centerLocation = tileCoordinatesToLocation(EXTENT / 2, EXTENT / 2, canonical);
-    const mercatorCoord = MercatorCoordinate.fromLngLat(centerLocation);
+    return getTileUnitsForMetersAt(distanceInMeters, EXTENT / 2, EXTENT / 2, canonical);
+}
+
+/**
+ * Converts a distance in meters to tile units at `(x, y)` inside `canonical`.
+ */
+export function getTileUnitsForMetersAt(
+    distanceInMeters: number,
+    x: number,
+    y: number,
+    canonical: CanonicalTileID,
+): number {
+    const location = tileCoordinatesToLocation(x, y, canonical);
+    const mercatorCoord = MercatorCoordinate.fromLngLat(location);
     const meterInMercator = mercatorCoord.meterInMercatorCoordinateUnits();
     const tileUnitsPerMercator = (1 << canonical.z) * EXTENT;
     return distanceInMeters * meterInMercator * tileUnitsPerMercator;

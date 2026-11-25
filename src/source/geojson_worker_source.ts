@@ -83,6 +83,7 @@ export class GeoJSONWorkerSource implements WorkerSource {
      * {@link LoadGeoJSONParameters.crs}: `undefined` without one, or without a projection handler to build it with.
      */
     _crsHelper: CRSWorldCoordinateHelper | undefined;
+    _tileBuffer?: number;
 
     constructor(actor: IActor, layerIndex: StyleLayerIndex, availableImages: string[], createGeoJSONIndexFunc: typeof createGeoJSONIndex = createGeoJSONIndex) {
         this.actor = actor;
@@ -117,6 +118,7 @@ export class GeoJSONWorkerSource implements WorkerSource {
         const {uid} = params;
 
         const workerTile = new WorkerTile(params);
+        workerTile.tileBuffer = this._tileBuffer;
         workerTile.abort = new AbortController();
         try {
             const loadResult = this.loadVectorTile(params);
@@ -257,6 +259,7 @@ export class GeoJSONWorkerSource implements WorkerSource {
      * @returns a promise that is resolved with the processes GeoJSON
      */
     async loadAndProcessGeoJSON(params: LoadGeoJSONParameters, abortController: AbortController): Promise<GeoJSON.GeoJSON> {
+        this._tileBuffer = params.geojsonVtOptions?.buffer;
         if (params.request) {
             params.data = (await getJSON<GeoJSON.GeoJSON>(params.request, abortController)).data;
         }

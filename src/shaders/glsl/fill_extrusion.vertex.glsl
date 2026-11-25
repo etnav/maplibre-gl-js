@@ -12,6 +12,13 @@ layout(location = 1) in ivec4 a_normal_ed;
     layout(location = 2) in vec2 a_centroid;
 #endif
 
+#ifdef HAS_ROOFS
+    #ifdef TERRAIN3D
+        layout(location = 3) in vec2 a_roof;
+    #else
+        layout(location = 2) in vec2 a_roof;
+    #endif
+#endif
 
 out vec4 v_color;
 
@@ -20,12 +27,24 @@ out vec4 v_color;
 
 #pragma maplibre: define highp vec4 color
 #pragma maplibre: define highp float opacity
+#ifdef HAS_ROOF_COLOR
+    #pragma maplibre: define highp vec4 roof_color
+#endif
+#ifdef HAS_ROOFS
+    #pragma maplibre: define highp float roof_height
+#endif
 
 void main() {
     #pragma maplibre: initialize highp float base
     #pragma maplibre: initialize highp float height
     #pragma maplibre: initialize highp vec4 color
     #pragma maplibre: initialize highp float opacity
+    #ifdef HAS_ROOF_COLOR
+        #pragma maplibre: initialize highp vec4 roof_color
+    #endif
+    #ifdef HAS_ROOFS
+        #pragma maplibre: initialize highp float roof_height
+    #endif
 
     opacity = clamp(opacity, 0.0, 1.0);
     if (opacity <= 0.0) {
@@ -58,6 +77,16 @@ void main() {
 
     float t = float(a_normal_ed.x & 1);
     float elevation = t > 0.0 ? height : base;
+
+    #ifdef HAS_ROOFS
+        if (a_roof.x >= 0.0) {
+            float roof_R = a_roof.y < 0.0 ? max(0.0, roof_height) : a_roof.y / 100.0;
+            float roof_R_prime = min(roof_R, max(0.0, gradient_height - gradient_base));
+            elevation = height - roof_R_prime * (1.0 - a_roof.x / 32767.0);
+            normal = vec3(normal.xy * roof_R_prime, normal.z);
+        }
+    #endif
+
     vec2 posInTile = a_pos + u_fill_translate;
 
     #ifdef GLOBE
@@ -67,17 +96,27 @@ void main() {
         gl_Position = u_projection_matrix * vec4(posInTile, elevation, 1.0);
     #endif
 
+    #ifdef HAS_ROOF_COLOR
+        vec4 surfaceColor = normal.z != 0.0 ? roof_color : color;
+    #else
+        vec4 surfaceColor = color;
+    #endif
+
     // Relative luminance (how dark/bright is the surface color?)
-    float colorvalue = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
+    float colorvalue = surfaceColor.r * 0.2126 + surfaceColor.g * 0.7152 + surfaceColor.b * 0.0722;
 
     v_color = vec4(0.0, 0.0, 0.0, 1.0);
 
     // Add slight ambient lighting so no extrusions are totally black
     vec4 ambientlight = vec4(0.03, 0.03, 0.03, 1.0);
-    color += ambientlight;
+    surfaceColor += ambientlight;
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    vec3 normalForLighting = normal / 16384.0;
+    #ifdef HAS_ROOFS
+        vec3 normalForLighting = normalize(normal / 16384.0);
+    #else
+        vec3 normalForLighting = normal / 16384.0;
+    #endif
     float directional = clamp(dot(normalForLighting, u_lightpos), 0.0, 1.0);
 
     #ifdef GLOBE
@@ -105,8 +144,8 @@ void main() {
     // Assign final color based on surface + ambient light color, diffuse light directional, and light color
     // with lower bounds adjusted to hue of light
     // so that shading is tinted with the complementary (opposite) color to the light color
-    v_color.r += clamp(color.r * directional * u_lightcolor.r, mix(0.0, 0.3, 1.0 - u_lightcolor.r), 1.0);
-    v_color.g += clamp(color.g * directional * u_lightcolor.g, mix(0.0, 0.3, 1.0 - u_lightcolor.g), 1.0);
-    v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
+    v_color.r += clamp(surfaceColor.r * directional * u_lightcolor.r, mix(0.0, 0.3, 1.0 - u_lightcolor.r), 1.0);
+    v_color.g += clamp(surfaceColor.g * directional * u_lightcolor.g, mix(0.0, 0.3, 1.0 - u_lightcolor.g), 1.0);
+    v_color.b += clamp(surfaceColor.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
     v_color *= opacity;
 }

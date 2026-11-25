@@ -3,6 +3,8 @@ import {type Segment, SegmentVector} from '../data/segment.ts';
 import type {LineIndexArray, TriangleIndexArray} from '../data/array_types.g.ts';
 import type {StructArray} from '../util/struct_array.ts';
 
+type AddVertex = (x: number, y: number, index: number) => void;
+
 /**
  * This function will take any "mesh" and fill in into vertex buffers, breaking it up into multiple drawcalls as needed
  * if too many (\>65535) vertices are used.
@@ -25,7 +27,7 @@ import type {StructArray} from '../util/struct_array.ts';
  * @param lineList - Line indices into `flattened`. Only needed if the mesh also contains lines.
  */
 export function fillLargeMeshArrays(
-    addVertex: (x: number, y: number) => void,
+    addVertex: AddVertex,
     segmentsTriangles: SegmentVector,
     vertexArray: StructArray,
     triangleIndexArray: TriangleIndexArray,
@@ -65,7 +67,7 @@ export function fillLargeMeshArrays(
 
         // Add vertices into vertex buffer
         for (let i = 0; i < flattened.length; i += 2) {
-            addVertex(flattened[i], flattened[i + 1]);
+            addVertex(flattened[i], flattened[i + 1], i / 2);
         }
 
         if (hasLines) {
@@ -122,7 +124,7 @@ export function fillLargeMeshArrays(
 function copyOrReuseVertex(
     actualVertexIndices: number[],
     flattened: number[],
-    addVertex: (x: number, y: number) => void,
+    addVertex: AddVertex,
     totalVerticesCreated: {count: number},
     oldIndex: number,
     needsCopy: boolean,
@@ -130,7 +132,7 @@ function copyOrReuseVertex(
 ): number {
     if (needsCopy) {
         const newIndex = totalVerticesCreated.count;
-        addVertex(flattened[oldIndex * 2], flattened[oldIndex * 2 + 1]);
+        addVertex(flattened[oldIndex * 2], flattened[oldIndex * 2 + 1], oldIndex);
         actualVertexIndices[oldIndex] = totalVerticesCreated.count;
         totalVerticesCreated.count++;
         segment.vertexLength++;
@@ -146,7 +148,7 @@ function fillSegmentsTriangles(
     triangleIndexArray: TriangleIndexArray,
     flattened: number[],
     triangleIndices: number[],
-    addVertex: (x: number, y: number) => void
+    addVertex: AddVertex
 ) {
     // Array, or rather a map of [vertex index in the original data] -> index of the latest copy of this vertex in the final vertex buffer.
     const actualVertexIndices: number[] = [];
@@ -208,7 +210,7 @@ function fillSegmentsLines(
     lineIndexArray: LineIndexArray,
     flattened: number[],
     lineList: number[][],
-    addVertex: (x: number, y: number) => void
+    addVertex: AddVertex
 ) {
     // Array, or rather a map of [vertex index in the original data] -> index of the latest copy of this vertex in the final vertex buffer.
     const actualVertexIndices: number[] = [];

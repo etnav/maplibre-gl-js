@@ -43,3 +43,41 @@ export function isEntirelyOutside(ring: Point2D[]): boolean {
 export function isOutsideTile(p: Point2D): boolean {
     return p.x < 0 || p.x >= EXTENT || p.y < 0 || p.y >= EXTENT;
 }
+
+export const DEFAULT_TILE_BUFFER = 128;
+
+/** Whether an axis-aligned edge lies on a tile or buffer clip boundary. */
+export function isClipEdge(a: Point2D, b: Point2D, buffer: number, extent: number = EXTENT): boolean {
+    if (a.x === b.x) {
+        return a.x === 0 || a.x === extent || a.x === -buffer || a.x === extent + buffer;
+    }
+    if (a.y === b.y) {
+        return a.y === 0 || a.y === extent || a.y === -buffer || a.y === extent + buffer;
+    }
+    return false;
+}
+
+function fitsBorderBuffer(min: number, max: number, buffer: number, extent: number): boolean {
+    if (min <= 0 && (min < -buffer || max > buffer)) return false;
+    if (max >= extent && (max > extent + buffer || min < extent - buffer)) return false;
+    return true;
+}
+
+/** Whether `ring` has no clip edges and stays within `buffer` past any tile border it touches. */
+export function isHeldWholeByEveryTile(ring: Point2D[], buffer: number, extent: number = EXTENT): boolean {
+    if (ring.length < 2) return false;
+
+    let minX = ring[0].x;
+    let maxX = minX;
+    let minY = ring[0].y;
+    let maxY = minY;
+    for (let i = 1; i < ring.length; i++) {
+        const p = ring[i];
+        if (isClipEdge(ring[i - 1], p, buffer, extent)) return false;
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+    }
+    return fitsBorderBuffer(minX, maxX, buffer, extent) && fitsBorderBuffer(minY, maxY, buffer, extent);
+}
